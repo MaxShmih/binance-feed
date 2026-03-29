@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -22,6 +23,8 @@ SQUARE_ADD_URL = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/c
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 TARGET_SPOT_PAIR = "NEARUSDT"
 TARGET_PAIR_DISPLAY = "NEAR/USDT"
+FP_MAX = 8
+FP_TEASER_LEN = 96
 
 SYSTEM_NEAR_FEED_PROMPT = """Act as a crypto market analyst writing a single Binance Feed post.
 
@@ -31,15 +34,15 @@ Write 1 short, engaging post about NEAR Protocol ($NEAR) in English.
 Requirements:
 - Ground the post in the DATA SNAPSHOT from the user message (Binance spot NEAR/USDT, live 24h stats). If the snapshot is unavailable, use only logical structure (range, consolidation, breakout potential) — do NOT invent specific prices or fake news.
 - When you mention prices, write them like a human trader: short decimals only (e.g. 1.19 USDT, 1.149 USDT) — NEVER paste long machine strings like 1.19200000 or 9.1234567.
-- Do NOT sound like spam or aggressive promotion.
-- Avoid direct calls like "buy now" or "don't miss this".
-- Make it feel like a natural observation from a trader.
+- STYLE BRIEF may ask for emojis, curiosity hooks, or stronger engagement — still stay Binance-safe: no fake headlines, no guaranteed returns, not financial advice.
+- Forbidden phrases/ideas: "buy now", "don't miss", "guaranteed", "100x", pump guarantees, fake partnerships/news.
+- Allowed engagement: watchlist framing, level-watching, risk-aware "if/then", session bias, volume/participation angles — still not financial advice.
+- Do NOT sound like low-quality spam; even loud or clicky styles must stay credible to the snapshot.
 
 Style:
-- 2 short paragraphs maximum (body text before hashtags).
-- Each run you will get a UNIQUE STYLE BRIEF in the user message — follow it strictly so the post does not read like copy-paste from previous posts.
-- Vary openings: do NOT default to the same template (avoid repetitive starts like "NEAR Protocol has been", "Looking at the chart", "In the last 24 hours" every time).
-- Clean, confident tone. No cringe, no overhype, no fake news. Slight FOMO allowed, subtle.
+- 2 short paragraphs maximum (body text before hashtags), unless STYLE BRIEF explicitly asks for a different micro-shape (e.g. one-liner + paragraph).
+- Each run you get a UNIQUE STYLE BRIEF — follow it strictly. Vary energy, rhythm, and devices wildly between runs.
+- You may see RECENT_POST_DIGESTS — do NOT imitate their hook, sentence shapes, metaphors, or emoji pattern; same numbers from snapshot are fine.
 
 Structure:
 1) Hook (must match the STYLE BRIEF)
@@ -53,15 +56,8 @@ Hashtags (mandatory):
 - Always include: $NEAR and #near (Cashtag + hashtag as specified).
 - Add 3–5 more relevant tags (e.g. #crypto #altcoins #trading #web3 #DeFi).
 
-Goal:
-Make the reader think: "this is interesting, I should keep an eye on NEAR"
-NOT: "this is an ad"
-
-Important:
-Write like a real trader, not a promoter. Not financial advice.
-
 Output rules:
-Reply with ONLY the full post text ready to publish — no title, no markdown code fences, no "Here is your post" or preamble — exactly what goes into the feed."""
+Reply with ONLY the full post text ready to publish — no title, no markdown code fences, no preamble — exactly what goes into the feed."""
 
 STYLE_BRIEFS: tuple[str, ...] = (
     "STYLE: Open with one sharp thesis sentence (no 'Recently', no 'In the last 24h'). Then support it. Dry, confident.",
@@ -74,17 +70,90 @@ STYLE_BRIEFS: tuple[str, ...] = (
     "STYLE: Macro line (one clause on L1/execution narrative) then snap to spot data from the snapshot only.",
     "STYLE: Twitter-density: tight wording, minimal filler, high signal. Still two proper paragraphs.",
     "STYLE: Open with the exact 24h % change as the first clause (must match snapshot); unexpected second sentence.",
-    "STYLE: Story beat: 'Noticed something on the tape…' — observational fiction framing OK; all figures must match snapshot.",
-    "STYLE: Paragraph 2 uses three parallel short beats (rhythm like: clause; clause; clause). No bullet characters.",
+    "STYLE: Story beat: 'Noticed something on the tape…' — observational framing OK; all figures must match snapshot.",
+    "STYLE: Paragraph 2 uses three parallel short beats (rhythm: clause; clause; clause). No bullet characters.",
     "STYLE: Slightly informal voice (still professional): one mild idiom allowed, not slang-heavy.",
     "STYLE: Technician voice: focus on range, invalidation, and what breaks the setup — neutral wording.",
     "STYLE: Begin with the high/low range from the snapshot as the hook, then interpret participation (volume).",
     "STYLE: Skeptical bull: respectful doubt + what would confirm strength. No bearish trash talk.",
-    "STYLE: First paragraph only setup; second paragraph only 'what I'm watching next' — clear handoff between them.",
-    "STYLE: No emoji anywhere. No exclamation marks in the body paragraphs.",
+    "STYLE: First paragraph only setup; second paragraph only 'what I'm watching next' — clear handoff.",
+    "STYLE: No emoji. No exclamation marks in the body paragraphs.",
+    "STYLE: Use 2–4 tasteful emojis in the body (not only at the end). Match emoji mood to green/red tape from snapshot.",
+    "STYLE: Clickbait-CURIOUS opener (no lies): make the reader want the second sentence; still truthful to data.",
+    "STYLE: Cliffhanger between paragraphs: end para 1 on a tension beat; para 2 resolves with levels to watch.",
+    "STYLE: High-energy trader voice: urgent but NOT scammy — watchlist + key levels + what invalidates the idea.",
+    "STYLE: Soft CTA: explicitly invite adding NEAR/USDT to a watchlist or marking levels (no buy/sell orders).",
+    "STYLE: 'Hot take' energy: bold opening opinion that you immediately qualify with snapshot facts.",
+    "STYLE: Ecosystem builder angle: dev/UX narrative in one clause, then price/volume reality check from snapshot.",
+    "STYLE: Risk-manager tone: scenarios A/B based on break above high or below low from snapshot.",
+    "STYLE: Minimalist: first paragraph max 2 sentences; second paragraph max 3 short sentences. Maximum contrast.",
+    "STYLE: Narrator voice: slightly dramatic but factual — like a voiceover, no fake events.",
+    "STYLE: Emoji-only hook line: first line is mostly emoji + 3–6 words; second line starts the real sentence.",
+    "STYLE: Data-forward: open with three comma-separated facts from snapshot, then interpret.",
+    "STYLE: Friendly group-chat tone: 'we're watching' vibe; still professional, no dumb slang.",
+    "STYLE: Zen calm: slow, spacious sentences; subtle FOMO only in the last line of paragraph 2.",
+    "STYLE: Meme-adjacent (light): one witty comparison; don't reference real people; keep it market-grounded.",
+    "STYLE: News-ticker brevity: staccato clauses; no filler words; two paragraphs still.",
+    "STYLE: Academic-lite: one precise definition clause (e.g. consolidation), then apply to NEAR/USDT snapshot.",
+    "STYLE: Bearish-honest if snapshot is red: name the drawdown, then constructive what absorption would look like.",
+    "STYLE: Bullish-honest if snapshot is green: name the strength, then what would make you cautious.",
+    "STYLE: Session playbook: 'If you're active today…' with 2–3 concrete checks tied to snapshot levels.",
+    "STYLE: Contrast compare: yesterday's range vs today's implication — only using snapshot numbers, no fake history.",
 )
 
 _LONG_DECIMAL = re.compile(r"\b\d+\.\d{5,}\b")
+
+
+def _fp_path() -> Path:
+    raw = os.environ.get("POST_FINGERPRINT_PATH", "").strip()
+    p = Path(raw) if raw else _ROOT / "data" / "post_fingerprints.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _normalize_for_fp(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip())[:2000]
+
+
+def body_digest(text: str) -> str:
+    return hashlib.sha256(_normalize_for_fp(text).encode("utf-8")).hexdigest()[:20]
+
+
+def load_fingerprint_records(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    rows: list[dict[str, str]] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            o = json.loads(line)
+            if isinstance(o, dict) and o.get("d") and o.get("t") is not None:
+                rows.append({"d": str(o["d"]), "t": str(o["t"])[:FP_TEASER_LEN]})
+    except (OSError, json.JSONDecodeError):
+        return []
+    return rows[-FP_MAX:]
+
+
+def format_anti_repeat_block(records: list[dict[str, str]]) -> str:
+    if not records:
+        return ""
+    lines = [
+        "RECENT_POST_DIGESTS (do not imitate hook, rhythm, metaphors, or emoji usage; factual overlap OK):"
+    ]
+    for r in records:
+        lines.append(f"- id:{r['d']} … \"{r['t']}\"")
+    return "\n".join(lines)
+
+
+def append_fingerprint(path: Path, body: str) -> None:
+    norm = _normalize_for_fp(body)
+    rec = {"d": body_digest(body), "t": norm[:FP_TEASER_LEN]}
+    prev = load_fingerprint_records(path)
+    prev.append(rec)
+    prev = prev[-FP_MAX:]
+    path.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in prev) + "\n", encoding="utf-8")
 
 
 def _to_decimal(v: Any) -> Decimal | None:
@@ -202,41 +271,84 @@ def build_market_snapshot_en(ticker: dict[str, Any] | None) -> str:
     )
 
 
-def _chat_messages(*, market_snapshot: str, style_brief: str) -> list[dict[str, str]]:
-    user = (
-        f"{style_brief}\n\n"
-        f"DATA SNAPSHOT:\n{market_snapshot}\n\n"
-        "Write the Binance Feed post now (English only). Obey the STYLE line and all system rules."
+def _chat_messages(
+    *,
+    market_snapshot: str,
+    style_brief: str,
+    anti_repeat: str,
+    retry_note: str,
+) -> list[dict[str, str]]:
+    parts = [style_brief.strip()]
+    if anti_repeat:
+        parts.append(anti_repeat.strip())
+    if retry_note:
+        parts.append(retry_note.strip())
+    parts.append(f"DATA SNAPSHOT:\n{market_snapshot}")
+    parts.append(
+        "Write the Binance Feed post now (English only). Obey STYLE + anti-repeat + all system rules."
     )
+    user = "\n\n".join(parts)
     return [
         {"role": "system", "content": SYSTEM_NEAR_FEED_PROMPT},
         {"role": "user", "content": user},
     ]
 
 
-def generate_post_groq(*, market_snapshot: str) -> str:
+def _groq_complete(messages: list[dict[str, str]], *, model: str, temp: float) -> str:
+    from groq import Groq
+
     key = os.environ.get("GROQ_API_KEY", "").strip()
     if not key:
         print("Set GROQ_API_KEY", file=sys.stderr)
         sys.exit(1)
-
-    from groq import Groq
-
-    model = os.environ.get("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL
-    style_brief = random.choice(STYLE_BRIEFS)
-    temp = random.uniform(0.58, 0.84)
     client = Groq(api_key=key, timeout=120.0)
     resp = client.chat.completions.create(
         model=model,
-        messages=_chat_messages(market_snapshot=market_snapshot, style_brief=style_brief),
+        messages=messages,
         temperature=temp,
-        max_tokens=650,
+        max_tokens=700,
     )
     raw = (resp.choices[0].message.content or "").strip()
     text = _strip_wrapping(raw)
     if not text:
         sys.exit(1)
     return text
+
+
+def generate_post_with_variety(
+    *,
+    market_snapshot: str,
+    fp_records: list[dict[str, str]],
+) -> str:
+    model = os.environ.get("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL
+    known_d = {r["d"] for r in fp_records}
+    anti = format_anti_repeat_block(fp_records)
+    style_a = random.choice(STYLE_BRIEFS)
+    style_b = random.choice([s for s in STYLE_BRIEFS if s != style_a] or STYLE_BRIEFS)
+    temp_a = random.uniform(0.58, 0.88)
+    temp_b = random.uniform(0.62, 0.92)
+
+    retry_note = ""
+    chosen_style = style_a
+    chosen_temp = temp_a
+    for attempt in range(2):
+        messages = _chat_messages(
+            market_snapshot=market_snapshot,
+            style_brief=chosen_style,
+            anti_repeat=anti,
+            retry_note=retry_note,
+        )
+        raw = _groq_complete(messages, model=model, temp=chosen_temp)
+        body = finalize_post_body(raw)
+        if body_digest(body) not in known_d:
+            return body
+        retry_note = (
+            "RETRY: Your output was too close to a recent digest (duplicate vibe). "
+            "Rewrite completely: different hook, different rhythm, different devices — still truthful to snapshot."
+        )
+        chosen_style = style_b
+        chosen_temp = temp_b
+    return body
 
 
 def _strip_wrapping(text: str) -> str:
@@ -276,9 +388,12 @@ def main() -> None:
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
 
+    fp_path = _fp_path()
+    fp_records = load_fingerprint_records(fp_path)
+
     ticker = fetch_24h_ticker_near()
     snapshot = build_market_snapshot_en(ticker)
-    body = finalize_post_body(generate_post_groq(market_snapshot=snapshot))
+    body = generate_post_with_variety(market_snapshot=snapshot, fp_records=fp_records)
 
     print("--- Post (EN) ---")
     print(body)
@@ -312,6 +427,8 @@ def main() -> None:
         print(f"Published: {url}")
     else:
         print("OK but no id")
+
+    append_fingerprint(fp_path, body)
 
     send_telegram(
         f"Published {TARGET_PAIR_DISPLAY}\n"

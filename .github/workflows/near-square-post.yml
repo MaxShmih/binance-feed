@@ -34,6 +34,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/cache/restore@v4
+        id: cache_fp
+        with:
+          path: state
+          key: near-post-fp-${{ github.run_id }}
+          restore-keys: near-post-fp-
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -42,9 +49,17 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Run
+        env:
+          POST_FINGERPRINT_PATH: state/post_fingerprints.jsonl
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             python post_square.py --dry-run
           else
             python post_square.py
           fi
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state
+          key: near-post-fp-${{ github.run_id }}
