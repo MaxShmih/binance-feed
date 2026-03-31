@@ -7,8 +7,6 @@ on:
         description: Only generate text, no Binance publish
         type: boolean
         default: false
-  schedule:
-    - cron: "*/20 * * * *"
 
 permissions:
   contents: read
