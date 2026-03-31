@@ -41,6 +41,7 @@ Requirements:
 - Human voice rules: use contractions sometimes, varied sentence length, and at least one “human” beat (a quick aside, a tiny opinion, or a micro-reaction) without sounding cringe.
 - Avoid corporate/robot patterns like: "In the last 24h...", "Here are the key metrics:", "This indicates...", "As we can see...".
 - Even when loud/clicky, do NOT sound like low-quality spam; stay credible to the snapshot.
+- Strong CTA is encouraged but must be Binance-safe: watchlist, alerts, levels, scenarios, and "tap $NEAR to open NEAR/USDT".
 
 Style:
 - Length must feel natural and human: you may write 1–3 short paragraphs, OR a one-liner hook + 1 short paragraph.
@@ -51,13 +52,14 @@ Style:
 Structure:
 1) Hook (must match the STYLE BRIEF)
 2) Insight (structure, behavior, what to watch)
+3) Action (CTA): include ONE clear action line in the body (not in hashtags): alerts/watchlist/levels, and explicitly say "Tap $NEAR to open NEAR/USDT" (or equivalent).
 
 Ending:
 - Mention $NEAR naturally in the body (not only in hashtags).
 - After the paragraphs, add ONE blank line, then hashtags on their own line(s).
 
 Hashtags (mandatory):
-- Always include: $NEAR and #near (Cashtag + hashtag as specified).
+- Always include: #near
 - Add 3–5 more relevant tags (e.g. #crypto #altcoins #trading #web3 #DeFi).
 
 Output rules:
@@ -109,6 +111,9 @@ STYLE_BRIEFS: tuple[str, ...] = (
     "STYLE: High-stakes framing without promises: 'This level decides the next move.' Then show both scenarios (if above/if below) using snapshot high/low.",
     "STYLE: Group chat hype (credible): one playful line + one sharp trading plan line. 2–3 emojis total, placed inside sentences.",
     "STYLE: Ultra-clicky opener (safe): tease a 'trap' or 'fakeout' possibility, but you must hedge and ground it in snapshot range/volume.",
+    "STYLE: Salesy-but-safe: write like you're convincing a friend to pay attention today — emotional hook, then a concrete watch plan + one strong CTA line (tap $NEAR / set alerts).",
+    "STYLE: FOMO-without-lies: urgency through structure (compression / decision levels / volume), then clear actions: watchlist + alerts + tap $NEAR.",
+    "STYLE: One-liner hook + action: first line is a punchy hook; second line is an actionable plan with levels; last line is a direct CTA (tap $NEAR).",
 )
 
 _LONG_DECIMAL = re.compile(r"\b\d+\.\d{5,}\b")
@@ -223,13 +228,47 @@ def append_spot_trade_link(body: str) -> str:
         return body
     cta = os.environ.get(
         "SQUARE_TRADE_CTA_LINE",
-        "Spot NEAR/USDT (your ref link):",
+        "Open spot NEAR/USDT (ref link):",
     ).strip()
     return f"{body.rstrip()}\n\n{cta}\n{url}"
 
 
+def _split_hashtags(body: str) -> tuple[str, str]:
+    """
+    Split into (main_text, hashtag_block).
+    Heuristic: first line starting with '#' starts the hashtag block.
+    """
+    lines = body.strip().splitlines()
+    for i, ln in enumerate(lines):
+        if ln.strip().startswith("#"):
+            main = "\n".join(lines[:i]).rstrip()
+            tags = "\n".join(lines[i:]).strip()
+            return main, tags
+    return body.strip(), ""
+
+
+_CASHTAG_NEAR = re.compile(r"(?<!\\w)\\$NEAR(?!\\w)")
+
+
+def ensure_actionable_body(body: str) -> str:
+    main, tags = _split_hashtags(body)
+
+    # Ensure $NEAR exists in the body (helps Square auto-surfaces trade link/widgets).
+    if not _CASHTAG_NEAR.search(main):
+        main = f"Watching $NEAR on {TARGET_PAIR_DISPLAY}.\n{main}".strip()
+
+    # Ensure a direct, action-oriented CTA exists in the body.
+    if "tap $near" not in main.lower():
+        main = f"{main.rstrip()}\nTap $NEAR to open {TARGET_PAIR_DISPLAY} and set alerts."
+
+    if tags:
+        return f"{main.rstrip()}\n\n{tags}"
+    return main
+
+
 def finalize_post_body(body: str) -> str:
     body = humanize_long_decimals(body)
+    body = ensure_actionable_body(body)
     body = append_spot_trade_link(body)
     return body
 
