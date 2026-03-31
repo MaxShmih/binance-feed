@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import Iterable
 
 import httpx
@@ -26,6 +27,10 @@ def send_telegram(text: str) -> bool:
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chats = _chat_ids()
     if not token or not chats:
+        print(
+            "Telegram: skipped (missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID).",
+            file=sys.stderr,
+        )
         return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     ok = True
@@ -42,8 +47,21 @@ def send_telegram(text: str) -> bool:
                     timeout=30.0,
                 )
                 if r.status_code != 200:
+                    try:
+                        detail = r.text.strip()
+                    except Exception:
+                        detail = ""
+                    print(
+                        f"Telegram: sendMessage failed (status={r.status_code}, chat_id={chat_id})"
+                        + (f": {detail[:400]}" if detail else ""),
+                        file=sys.stderr,
+                    )
                     ok = False
             except httpx.HTTPError:
+                print(
+                    f"Telegram: sendMessage HTTP error (chat_id={chat_id}).",
+                    file=sys.stderr,
+                )
                 ok = False
     return ok
 

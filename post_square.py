@@ -441,12 +441,14 @@ def main() -> None:
 
     append_fingerprint(fp_path, body)
 
-    send_telegram(
+    tg_ok = send_telegram(
         f"Published {TARGET_PAIR_DISPLAY}\n"
         + (f"{url}\n" if url else "")
         + f"\n{body[:600]}"
         + ("…" if len(body) > 600 else "")
     )
+    if not tg_ok:
+        print("Telegram: notification was not delivered (see logs above).", file=sys.stderr)
 
 
 if __name__ == "__main__":
