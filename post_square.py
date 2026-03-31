@@ -26,7 +26,7 @@ TARGET_PAIR_DISPLAY = "NEAR/USDT"
 FP_MAX = 8
 FP_TEASER_LEN = 96
 
-SYSTEM_NEAR_FEED_PROMPT = """Act as a crypto market analyst writing a single Binance Feed post.
+SYSTEM_NEAR_FEED_PROMPT = """Act as a real human crypto trader/analyst writing a single Binance Feed post.
 
 Task:
 Write 1 short, engaging post about NEAR Protocol ($NEAR) in English.
@@ -35,12 +35,16 @@ Requirements:
 - Ground the post in the DATA SNAPSHOT from the user message (Binance spot NEAR/USDT, live 24h stats). If the snapshot is unavailable, use only logical structure (range, consolidation, breakout potential) — do NOT invent specific prices or fake news.
 - When you mention prices, write them like a human trader: short decimals only (e.g. 1.19 USDT, 1.149 USDT) — NEVER paste long machine strings like 1.19200000 or 9.1234567.
 - STYLE BRIEF may ask for emojis, curiosity hooks, or stronger engagement — still stay Binance-safe: no fake headlines, no guaranteed returns, not financial advice.
+- Clickbait is allowed ONLY as a hook technique (curiosity gap, bold question, spicy-but-true claim). It must remain truthful to the snapshot and immediately supported by facts.
 - Forbidden phrases/ideas: "buy now", "don't miss", "guaranteed", "100x", pump guarantees, fake partnerships/news.
 - Allowed engagement: watchlist framing, level-watching, risk-aware "if/then", session bias, volume/participation angles — still not financial advice.
-- Do NOT sound like low-quality spam; even loud or clicky styles must stay credible to the snapshot.
+- Human voice rules: use contractions sometimes, varied sentence length, and at least one “human” beat (a quick aside, a tiny opinion, or a micro-reaction) without sounding cringe.
+- Avoid corporate/robot patterns like: "In the last 24h...", "Here are the key metrics:", "This indicates...", "As we can see...".
+- Even when loud/clicky, do NOT sound like low-quality spam; stay credible to the snapshot.
 
 Style:
-- 2 short paragraphs maximum (body text before hashtags), unless STYLE BRIEF explicitly asks for a different micro-shape (e.g. one-liner + paragraph).
+- Length must feel natural and human: you may write 1–3 short paragraphs, OR a one-liner hook + 1 short paragraph.
+- Keep it scannable: avoid walls of text; prefer short lines and varied sentence length.
 - Each run you get a UNIQUE STYLE BRIEF — follow it strictly. Vary energy, rhythm, and devices wildly between runs.
 - You may see RECENT_POST_DIGESTS — do NOT imitate their hook, sentence shapes, metaphors, or emoji pattern; same numbers from snapshot are fine.
 
@@ -99,6 +103,12 @@ STYLE_BRIEFS: tuple[str, ...] = (
     "STYLE: Bullish-honest if snapshot is green: name the strength, then what would make you cautious.",
     "STYLE: Session playbook: 'If you're active today…' with 2–3 concrete checks tied to snapshot levels.",
     "STYLE: Contrast compare: yesterday's range vs today's implication — only using snapshot numbers, no fake history.",
+    "STYLE: Clickbait-but-true: open with a 6–10 word line that sounds like a reveal (no lies), then immediately back it with 2 snapshot facts.",
+    "STYLE: Scroll-stopper: first line is a bold question + 1 emoji; then a short answer that mentions $NEAR and one key level from snapshot.",
+    "STYLE: Human confession vibe: 'I didn't expect this on $NEAR today…' (must be explainable by snapshot), then what you’re watching next.",
+    "STYLE: High-stakes framing without promises: 'This level decides the next move.' Then show both scenarios (if above/if below) using snapshot high/low.",
+    "STYLE: Group chat hype (credible): one playful line + one sharp trading plan line. 2–3 emojis total, placed inside sentences.",
+    "STYLE: Ultra-clicky opener (safe): tease a 'trap' or 'fakeout' possibility, but you must hedge and ground it in snapshot range/volume.",
 )
 
 _LONG_DECIMAL = re.compile(r"\b\d+\.\d{5,}\b")
@@ -325,8 +335,9 @@ def generate_post_with_variety(
     anti = format_anti_repeat_block(fp_records)
     style_a = random.choice(STYLE_BRIEFS)
     style_b = random.choice([s for s in STYLE_BRIEFS if s != style_a] or STYLE_BRIEFS)
-    temp_a = random.uniform(0.58, 0.88)
-    temp_b = random.uniform(0.62, 0.92)
+    # Slightly higher temperature to reduce "dry" corporate tone.
+    temp_a = random.uniform(0.72, 1.02)
+    temp_b = random.uniform(0.78, 1.08)
 
     retry_note = ""
     chosen_style = style_a
