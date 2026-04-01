@@ -59,7 +59,7 @@ Ending:
 - After the paragraphs, add ONE blank line, then hashtags on their own line(s).
 
 Hashtags (mandatory):
-- Always include: #near
+- Always include: $NEAR and #near
 - Add 3–5 more relevant tags (e.g. #crypto #altcoins #trading #web3 #DeFi).
 
 Output rules:
@@ -115,6 +115,22 @@ STYLE_BRIEFS: tuple[str, ...] = (
     "STYLE: FOMO-without-lies: urgency through structure (compression / decision levels / volume), then clear actions: watchlist + alerts + tap $NEAR.",
     "STYLE: One-liner hook + action: first line is a punchy hook; second line is an actionable plan with levels; last line is a direct CTA (tap $NEAR).",
 )
+
+# 50% of generations should follow this aggressive high-converting brief.
+AGGRESSIVE_STYLE_BRIEF = """STYLE: Act as a crypto trader writing a high-converting Binance Feed post.
+
+Constraints:
+- 2 short paragraphs maximum.
+- Strong hook in the first line (must grab attention instantly).
+- Confident, slightly aggressive tone (like a trader spotting opportunity early).
+- Create urgency and FOMO, but WITHOUT direct “buy now” wording.
+- No spammy emojis (max 1, optional).
+
+Psychology:
+- Make it feel like “smart money is already paying attention”.
+- Imply that waiting = worse entry.
+- Make reader feel slightly late, but still early enough.
+"""
 
 _LONG_DECIMAL = re.compile(r"\b\d+\.\d{5,}\b")
 
@@ -249,17 +265,31 @@ def _split_hashtags(body: str) -> tuple[str, str]:
 
 _CASHTAG_NEAR = re.compile(r"(?<!\\w)\\$NEAR(?!\\w)")
 
+CTA_TEMPLATES: tuple[str, ...] = (
+    f"Tap $NEAR to open {TARGET_PAIR_DISPLAY} and set alerts.",
+    f"Tap $NEAR → open {TARGET_PAIR_DISPLAY}. Mark the levels and wait for the trigger.",
+    f"Tap $NEAR to pull up {TARGET_PAIR_DISPLAY} and set a price alert on the range edges.",
+    f"If you're trading today, tap $NEAR and watch {TARGET_PAIR_DISPLAY} into the next 1–2 candles.",
+)
+
+NEAR_BODY_INSERTS: tuple[str, ...] = (
+    "Keeping $NEAR on the radar.",
+    "$NEAR is the one I'm watching here.",
+    "This is why $NEAR has my attention today.",
+)
+
 
 def ensure_actionable_body(body: str) -> str:
     main, tags = _split_hashtags(body)
 
     # Ensure $NEAR exists in the body (helps Square auto-surfaces trade link/widgets).
     if not _CASHTAG_NEAR.search(main):
-        main = f"Watching $NEAR on {TARGET_PAIR_DISPLAY}.\n{main}".strip()
+        # Avoid a fixed intro line; insert a short varying sentence instead.
+        main = f"{main.rstrip()}\n\n{random.choice(NEAR_BODY_INSERTS)}".strip()
 
     # Ensure a direct, action-oriented CTA exists in the body.
     if "tap $near" not in main.lower():
-        main = f"{main.rstrip()}\nTap $NEAR to open {TARGET_PAIR_DISPLAY} and set alerts."
+        main = f"{main.rstrip()}\n{random.choice(CTA_TEMPLATES)}"
 
     if tags:
         return f"{main.rstrip()}\n\n{tags}"
@@ -372,8 +402,13 @@ def generate_post_with_variety(
     model = os.environ.get("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL
     known_d = {r["d"] for r in fp_records}
     anti = format_anti_repeat_block(fp_records)
-    style_a = random.choice(STYLE_BRIEFS)
-    style_b = random.choice([s for s in STYLE_BRIEFS if s != style_a] or STYLE_BRIEFS)
+    def pick_style() -> str:
+        return AGGRESSIVE_STYLE_BRIEF if random.random() < 0.5 else random.choice(STYLE_BRIEFS)
+
+    style_a = pick_style()
+    style_b = pick_style()
+    if style_b == style_a:
+        style_b = random.choice([s for s in STYLE_BRIEFS if s != style_a] or STYLE_BRIEFS)
     # Slightly higher temperature to reduce "dry" corporate tone.
     temp_a = random.uniform(0.72, 1.02)
     temp_b = random.uniform(0.78, 1.08)
