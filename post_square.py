@@ -26,111 +26,35 @@ TARGET_PAIR_DISPLAY = "NEAR/USDT"
 FP_MAX = 8
 FP_TEASER_LEN = 96
 
-SYSTEM_NEAR_FEED_PROMPT = """Act as a real human crypto trader/analyst writing a single Binance Feed post.
+SYSTEM_NEAR_FEED_PROMPT = """One Binance Square post in English about $NEAR.
+Only use numbers from SNAPSHOT; no fake news. Short price decimals; not financial advice.
+No: buy now, guaranteed, 100x. Body mentions $NEAR; end with #near + a few tags.
+Follow FORMAT from user. If RECENT lines exist, same data OK but different hook/shape.
+Output post text only (no fences)."""
 
-Task:
-Write 1 short, engaging post about NEAR Protocol ($NEAR) in English.
-
-Requirements:
-- Ground the post in the DATA SNAPSHOT from the user message (Binance spot NEAR/USDT, live 24h stats). If the snapshot is unavailable, use only logical structure (range, consolidation, breakout potential) — do NOT invent specific prices or fake news.
-- When you mention prices, write them like a human trader: short decimals only (e.g. 1.19 USDT, 1.149 USDT) — NEVER paste long machine strings like 1.19200000 or 9.1234567.
-- STYLE BRIEF may ask for emojis, curiosity hooks, or stronger engagement — still stay Binance-safe: no fake headlines, no guaranteed returns, not financial advice.
-- Clickbait is allowed ONLY as a hook technique (curiosity gap, bold question, spicy-but-true claim). It must remain truthful to the snapshot and immediately supported by facts.
-- Forbidden phrases/ideas: "buy now", "don't miss", "guaranteed", "100x", pump guarantees, fake partnerships/news.
-- Allowed engagement: watchlist framing, level-watching, risk-aware "if/then", session bias, volume/participation angles — still not financial advice.
-- Human voice rules: use contractions sometimes, varied sentence length, and at least one “human” beat (a quick aside, a tiny opinion, or a micro-reaction) without sounding cringe.
-- Avoid corporate/robot patterns like: "In the last 24h...", "Here are the key metrics:", "This indicates...", "As we can see...".
-- Even when loud/clicky, do NOT sound like low-quality spam; stay credible to the snapshot.
-- Strong CTA is encouraged but must be Binance-safe: watchlist, alerts, levels, scenarios, and "tap $NEAR to open NEAR/USDT".
-
-Style:
-- Length must feel natural and human: you may write 1–3 short paragraphs, OR a one-liner hook + 1 short paragraph.
-- Keep it scannable: avoid walls of text; prefer short lines and varied sentence length.
-- Each run you get a UNIQUE STYLE BRIEF — follow it strictly. Vary energy, rhythm, and devices wildly between runs.
-- You may see RECENT_POST_DIGESTS — do NOT imitate their hook, sentence shapes, metaphors, or emoji pattern; same numbers from snapshot are fine.
-
-Structure:
-1) Hook (must match the STYLE BRIEF)
-2) Insight (structure, behavior, what to watch)
-3) Action (CTA): include ONE clear action line in the body (not in hashtags): alerts/watchlist/levels, and explicitly say "Tap $NEAR to open NEAR/USDT" (or equivalent).
-
-Ending:
-- Mention $NEAR naturally in the body (not only in hashtags).
-- After the paragraphs, add ONE blank line, then hashtags on their own line(s).
-
-Hashtags (mandatory):
-- Always include: $NEAR and #near
-- Add 3–5 more relevant tags (e.g. #crypto #altcoins #trading #web3 #DeFi).
-
-Output rules:
-Reply with ONLY the full post text ready to publish — no title, no markdown code fences, no preamble — exactly what goes into the feed."""
-
-STYLE_BRIEFS: tuple[str, ...] = (
-    "STYLE: Open with one sharp thesis sentence (no 'Recently', no 'In the last 24h'). Then support it. Dry, confident.",
-    "STYLE: Start with a direct question to the reader, then answer in the same flow. Conversational but professional.",
-    "STYLE: Lead with volume/liquidity angle first; mention price levels second. Short, punchy sentences.",
-    "STYLE: Calm desk notes: understated, 'memo to self' tone. No hype adjectives.",
-    "STYLE: Second person — address 'you' as a trader: what to watch on NEAR/USDT this session.",
-    "STYLE: One vivid but tasteful metaphor (not childish) for the tape; numbers still grounded in the snapshot.",
-    "STYLE: Contrarian hook: acknowledge the obvious move, then add a constructive 'what would change my mind' angle.",
-    "STYLE: Macro line (one clause on L1/execution narrative) then snap to spot data from the snapshot only.",
-    "STYLE: Twitter-density: tight wording, minimal filler, high signal. Still two proper paragraphs.",
-    "STYLE: Open with the exact 24h % change as the first clause (must match snapshot); unexpected second sentence.",
-    "STYLE: Story beat: 'Noticed something on the tape…' — observational framing OK; all figures must match snapshot.",
-    "STYLE: Paragraph 2 uses three parallel short beats (rhythm: clause; clause; clause). No bullet characters.",
-    "STYLE: Slightly informal voice (still professional): one mild idiom allowed, not slang-heavy.",
-    "STYLE: Technician voice: focus on range, invalidation, and what breaks the setup — neutral wording.",
-    "STYLE: Begin with the high/low range from the snapshot as the hook, then interpret participation (volume).",
-    "STYLE: Skeptical bull: respectful doubt + what would confirm strength. No bearish trash talk.",
-    "STYLE: First paragraph only setup; second paragraph only 'what I'm watching next' — clear handoff.",
-    "STYLE: No emoji. No exclamation marks in the body paragraphs.",
-    "STYLE: Use 2–4 tasteful emojis in the body (not only at the end). Match emoji mood to green/red tape from snapshot.",
-    "STYLE: Clickbait-CURIOUS opener (no lies): make the reader want the second sentence; still truthful to data.",
-    "STYLE: Cliffhanger between paragraphs: end para 1 on a tension beat; para 2 resolves with levels to watch.",
-    "STYLE: High-energy trader voice: urgent but NOT scammy — watchlist + key levels + what invalidates the idea.",
-    "STYLE: Soft CTA: explicitly invite adding NEAR/USDT to a watchlist or marking levels (no buy/sell orders).",
-    "STYLE: 'Hot take' energy: bold opening opinion that you immediately qualify with snapshot facts.",
-    "STYLE: Ecosystem builder angle: dev/UX narrative in one clause, then price/volume reality check from snapshot.",
-    "STYLE: Risk-manager tone: scenarios A/B based on break above high or below low from snapshot.",
-    "STYLE: Minimalist: first paragraph max 2 sentences; second paragraph max 3 short sentences. Maximum contrast.",
-    "STYLE: Narrator voice: slightly dramatic but factual — like a voiceover, no fake events.",
-    "STYLE: Emoji-only hook line: first line is mostly emoji + 3–6 words; second line starts the real sentence.",
-    "STYLE: Data-forward: open with three comma-separated facts from snapshot, then interpret.",
-    "STYLE: Friendly group-chat tone: 'we're watching' vibe; still professional, no dumb slang.",
-    "STYLE: Zen calm: slow, spacious sentences; subtle FOMO only in the last line of paragraph 2.",
-    "STYLE: Meme-adjacent (light): one witty comparison; don't reference real people; keep it market-grounded.",
-    "STYLE: News-ticker brevity: staccato clauses; no filler words; two paragraphs still.",
-    "STYLE: Academic-lite: one precise definition clause (e.g. consolidation), then apply to NEAR/USDT snapshot.",
-    "STYLE: Bearish-honest if snapshot is red: name the drawdown, then constructive what absorption would look like.",
-    "STYLE: Bullish-honest if snapshot is green: name the strength, then what would make you cautious.",
-    "STYLE: Session playbook: 'If you're active today…' with 2–3 concrete checks tied to snapshot levels.",
-    "STYLE: Contrast compare: yesterday's range vs today's implication — only using snapshot numbers, no fake history.",
-    "STYLE: Clickbait-but-true: open with a 6–10 word line that sounds like a reveal (no lies), then immediately back it with 2 snapshot facts.",
-    "STYLE: Scroll-stopper: first line is a bold question + 1 emoji; then a short answer that mentions $NEAR and one key level from snapshot.",
-    "STYLE: Human confession vibe: 'I didn't expect this on $NEAR today…' (must be explainable by snapshot), then what you’re watching next.",
-    "STYLE: High-stakes framing without promises: 'This level decides the next move.' Then show both scenarios (if above/if below) using snapshot high/low.",
-    "STYLE: Group chat hype (credible): one playful line + one sharp trading plan line. 2–3 emojis total, placed inside sentences.",
-    "STYLE: Ultra-clicky opener (safe): tease a 'trap' or 'fakeout' possibility, but you must hedge and ground it in snapshot range/volume.",
-    "STYLE: Salesy-but-safe: write like you're convincing a friend to pay attention today — emotional hook, then a concrete watch plan + one strong CTA line (tap $NEAR / set alerts).",
-    "STYLE: FOMO-without-lies: urgency through structure (compression / decision levels / volume), then clear actions: watchlist + alerts + tap $NEAR.",
-    "STYLE: One-liner hook + action: first line is a punchy hook; second line is an actionable plan with levels; last line is a direct CTA (tap $NEAR).",
+# One FORMAT brief per run — keeps shape different (this drives variety more than a long system prompt).
+FORMAT_BRIEFS: tuple[str, ...] = (
+    "FORMAT: Exactly 3 short lines before hashtags. Line1 = hook. Line2 = one snapshot fact. Line3 = what you'd watch next. Then blank line, then hashtags.",
+    "FORMAT: One compact paragraph (2–3 sentences), then blank line, then hashtags.",
+    "FORMAT: Line1 = a question to the reader. Line2–3 = answer with snapshot data. Then blank line, then hashtags.",
+    "FORMAT: Telegram vibe: 2–4 very short lines, no 'essay' feel. Then blank line, then hashtags.",
+    "FORMAT: Start with 'Quick read:' then one more line only. Then blank line, then hashtags.",
+    "FORMAT: Two lines that start with '- ' (mini bullets), then one normal sentence if you need it. Then blank line, then hashtags.",
+    "FORMAT: Use '1)' and '2)' exactly two lines only (two beats). Then blank line, then hashtags.",
+    "FORMAT: First line = one short ALL-CAPS hook phrase. Next 1–2 lines normal case. Then blank line, then hashtags.",
+    "FORMAT: Mostly lowercase except $NEAR and USDT and numbers. 2–4 lines total before hashtags.",
+    "FORMAT: No emojis at all. Dry/humorless trader note. Then hashtags.",
+    "FORMAT: At most one emoji in the whole body, mid-line. Then hashtags.",
+    "FORMAT: Start with 'Bias:' one word + comma + one reason from snapshot. Then 1–2 lines detail. Then hashtags.",
+    "FORMAT: Contrast: 'Bulls see … / Bears see …' in two short lines (no fake news). Then hashtags.",
+    "FORMAT: Micro-story: 'Noticed … on the tape' → one twist → one watch item (all from snapshot). Then hashtags.",
 )
 
-# 50% of generations should follow this aggressive high-converting brief.
-AGGRESSIVE_STYLE_BRIEF = """STYLE: Act as a crypto trader writing a high-converting Binance Feed post.
-
-Constraints:
-- 2 short paragraphs maximum.
-- Strong hook in the first line (must grab attention instantly).
-- Confident, slightly aggressive tone (like a trader spotting opportunity early).
-- Create urgency and FOMO, but WITHOUT direct “buy now” wording.
-- No spammy emojis (max 1, optional).
-
-Psychology:
-- Make it feel like “smart money is already paying attention”.
-- Imply that waiting = worse entry.
-- Make reader feel slightly late, but still early enough.
-"""
+AGGRESSIVE_FORMAT_BRIEF = (
+    "FORMAT: High-converting trader energy: max 2 short paragraphs before hashtags. "
+    "Line1 must hit hard. Urgency/FOMO from structure (compression, breakout risk, levels) — no buy-now language, no guarantees. "
+    "Smart-money vibe OK. Optional: at most 1 emoji. Then blank line, then hashtags."
+)
 
 _LONG_DECIMAL = re.compile(r"\b\d+\.\d{5,}\b")
 
@@ -168,13 +92,18 @@ def load_fingerprint_records(path: Path) -> list[dict[str, str]]:
 
 
 def format_anti_repeat_block(records: list[dict[str, str]]) -> str:
-    if not records:
+    raw_cap = os.environ.get("GROQ_ANTI_REPEAT_TEASERS", "4").strip()
+    try:
+        cap = int(raw_cap)
+    except ValueError:
+        cap = 4
+    cap = max(0, min(cap, FP_MAX))
+    if cap == 0 or not records:
         return ""
-    lines = [
-        "RECENT_POST_DIGESTS (do not imitate hook, rhythm, metaphors, or emoji usage; factual overlap OK):"
-    ]
-    for r in records:
-        lines.append(f"- id:{r['d']} … \"{r['t']}\"")
+    use = records[-cap:]
+    lines = ["RECENT (vary hook/shape; nums OK):"]
+    for r in use:
+        lines.append(f"- {r['d']}: \"{r['t']}\"")
     return "\n".join(lines)
 
 
@@ -267,33 +196,41 @@ _CASHTAG_NEAR = re.compile(r"(?<!\\w)\\$NEAR(?!\\w)")
 
 CTA_TEMPLATES: tuple[str, ...] = (
     f"Tap $NEAR to open {TARGET_PAIR_DISPLAY} and set alerts.",
-    f"Tap $NEAR → open {TARGET_PAIR_DISPLAY}. Mark the levels and wait for the trigger.",
-    f"Tap $NEAR to pull up {TARGET_PAIR_DISPLAY} and set a price alert on the range edges.",
-    f"If you're trading today, tap $NEAR and watch {TARGET_PAIR_DISPLAY} into the next 1–2 candles.",
+    f"Tap $NEAR → open {TARGET_PAIR_DISPLAY}; mark the range edges.",
+    f"If you're active: tap $NEAR, pull up {TARGET_PAIR_DISPLAY}, set alerts.",
+)
+
+SOFT_CTA_TEMPLATES: tuple[str, ...] = (
+    f"Worth keeping {TARGET_PAIR_DISPLAY} on the watchlist today.",
+    f"I'm marking levels on {TARGET_PAIR_DISPLAY} and waiting for a clean trigger.",
+    f"Price alerts on {TARGET_PAIR_DISPLAY} beat guessing the tape.",
 )
 
 NEAR_BODY_INSERTS: tuple[str, ...] = (
-    "Keeping $NEAR on the radar.",
-    "$NEAR is the one I'm watching here.",
-    "This is why $NEAR has my attention today.",
+    "$NEAR — on my screen today.",
+    "Watching $NEAR vs this range.",
+    "Current read: $NEAR, spot tape.",
 )
 
 
 def ensure_actionable_body(body: str) -> str:
     main, tags = _split_hashtags(body)
 
-    # Ensure $NEAR exists in the body (helps Square auto-surfaces trade link/widgets).
+    # Light touch only: keep Square cashtag surfaces without forcing the same intro every time.
     if not _CASHTAG_NEAR.search(main):
-        # Avoid a fixed intro line; insert a short varying sentence instead.
-        main = f"{main.rstrip()}\n\n{random.choice(NEAR_BODY_INSERTS)}".strip()
+        main = f"{main.rstrip()}\n{random.choice(NEAR_BODY_INSERTS)}".strip()
 
-    # Ensure a direct, action-oriented CTA exists in the body.
-    if "tap $near" not in main.lower():
+    # Optional CTA — always pushing "tap $NEAR" made posts feel identical.
+    lower = main.lower()
+    if "tap $near" not in lower and random.random() < float(
+        os.environ.get("SQUARE_TAP_CTA_PROB", "0.35")
+    ):
         main = f"{main.rstrip()}\n{random.choice(CTA_TEMPLATES)}"
+    elif "watchlist" not in lower and "alert" not in lower and random.random() < 0.35:
+        main = f"{main.rstrip()}\n{random.choice(SOFT_CTA_TEMPLATES)}"
 
-    if tags:
-        return f"{main.rstrip()}\n\n{tags}"
-    return main
+    out = f"{main.rstrip()}\n\n{tags}".strip() if tags else main.rstrip()
+    return re.sub(r"\n{3,}", "\n\n", out).strip()
 
 
 def finalize_post_body(body: str) -> str:
@@ -341,12 +278,8 @@ def build_market_snapshot_en(ticker: dict[str, Any] | None) -> str:
     low = _fmt_price_usdt(ticker.get("lowPrice"))
     qv = _fmt_quote_volume(ticker.get("quoteVolume"))
     return (
-        f"Binance spot pair {TARGET_PAIR_DISPLAY} (symbol {TARGET_SPOT_PAIR}), 24h:\n"
-        f"- Last price: ~{last} USDT\n"
-        f"- 24h change: {pct}%\n"
-        f"- 24h high / low: ~{high} / ~{low} USDT\n"
-        f"- 24h quote volume (USDT): ~{qv}\n"
-        "Use only these rounded figures; write them in the post the same short way (no extra zeros)."
+        f"{TARGET_PAIR_DISPLAY} 24h: last ~{last} USDT, {pct}%, hi/lo ~{high}/{low}, qVol ~{qv} USDT. "
+        "Use only these figures; short decimals in post."
     )
 
 
@@ -362,15 +295,41 @@ def _chat_messages(
         parts.append(anti_repeat.strip())
     if retry_note:
         parts.append(retry_note.strip())
-    parts.append(f"DATA SNAPSHOT:\n{market_snapshot}")
-    parts.append(
-        "Write the Binance Feed post now (English only). Obey STYLE + anti-repeat + all system rules."
-    )
+    parts.append(f"SNAPSHOT:\n{market_snapshot}")
+    parts.append("Write the post (EN). FORMAT + rules above.")
     user = "\n\n".join(parts)
     return [
         {"role": "system", "content": SYSTEM_NEAR_FEED_PROMPT},
         {"role": "user", "content": user},
     ]
+
+
+def _is_groq_rate_limit(exc: BaseException) -> bool:
+    if type(exc).__name__ == "RateLimitError":
+        return True
+    if getattr(exc, "status_code", None) == 429:
+        return True
+    err = f"{type(exc).__name__}: {exc!s}"
+    low = err.lower()
+    return "429" in err or "rate_limit" in low or "rate limit" in low or "tpd" in low
+
+
+def _groq_max_tokens() -> int:
+    raw = os.environ.get("GROQ_MAX_TOKENS", "320").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        return 320
+    return max(120, min(n, 700))
+
+
+def _groq_generation_attempts() -> int:
+    raw = os.environ.get("GROQ_GENERATION_ATTEMPTS", "2").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        return 2
+    return max(1, min(n, 3))
 
 
 def _groq_complete(messages: list[dict[str, str]], *, model: str, temp: float) -> str:
@@ -381,12 +340,25 @@ def _groq_complete(messages: list[dict[str, str]], *, model: str, temp: float) -
         print("Set GROQ_API_KEY", file=sys.stderr)
         sys.exit(1)
     client = Groq(api_key=key, timeout=120.0)
-    resp = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temp,
-        max_tokens=700,
-    )
+    max_tok = _groq_max_tokens()
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temp,
+            max_tokens=max_tok,
+        )
+    except Exception as e:
+        if _is_groq_rate_limit(e):
+            print(
+                "Groq: rate limit (daily TPM/TPD or burst). "
+                "Options: wait for reset, post less often, shorten prompts (GROQ_MAX_TOKENS), "
+                "or upgrade Groq Dev Tier. Raw error:",
+                file=sys.stderr,
+            )
+            print(f"{e!s}", file=sys.stderr)
+            sys.exit(1)
+        raise
     raw = (resp.choices[0].message.content or "").strip()
     text = _strip_wrapping(raw)
     if not text:
@@ -402,13 +374,16 @@ def generate_post_with_variety(
     model = os.environ.get("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL
     known_d = {r["d"] for r in fp_records}
     anti = format_anti_repeat_block(fp_records)
-    def pick_style() -> str:
-        return AGGRESSIVE_STYLE_BRIEF if random.random() < 0.5 else random.choice(STYLE_BRIEFS)
+    def pick_format() -> str:
+        if random.random() < 0.25:
+            return AGGRESSIVE_FORMAT_BRIEF
+        return random.choice(FORMAT_BRIEFS)
 
-    style_a = pick_style()
-    style_b = pick_style()
+    style_a = pick_format()
+    style_b = pick_format()
     if style_b == style_a:
-        style_b = random.choice([s for s in STYLE_BRIEFS if s != style_a] or STYLE_BRIEFS)
+        pool = [s for s in FORMAT_BRIEFS if s != style_a] or list(FORMAT_BRIEFS)
+        style_b = random.choice(pool)
     # Slightly higher temperature to reduce "dry" corporate tone.
     temp_a = random.uniform(0.72, 1.02)
     temp_b = random.uniform(0.78, 1.08)
@@ -416,7 +391,8 @@ def generate_post_with_variety(
     retry_note = ""
     chosen_style = style_a
     chosen_temp = temp_a
-    for attempt in range(2):
+    attempts = _groq_generation_attempts()
+    for attempt in range(attempts):
         messages = _chat_messages(
             market_snapshot=market_snapshot,
             style_brief=chosen_style,
@@ -427,10 +403,7 @@ def generate_post_with_variety(
         body = finalize_post_body(raw)
         if body_digest(body) not in known_d:
             return body
-        retry_note = (
-            "RETRY: Your output was too close to a recent digest (duplicate vibe). "
-            "Rewrite completely: different hook, different rhythm, different devices — still truthful to snapshot."
-        )
+        retry_note = "RETRY: new hook + shape vs digests; same snapshot numbers OK."
         chosen_style = style_b
         chosen_temp = temp_b
     return body
@@ -476,6 +449,10 @@ def main() -> None:
     fp_path = _fp_path()
     fp_records = load_fingerprint_records(fp_path)
 
+    trig = os.environ.get("CRON_TRIGGER_ID", "").strip()
+    if trig:
+        print(f"trigger_id={trig}", file=sys.stderr)
+
     ticker = fetch_24h_ticker_near()
     snapshot = build_market_snapshot_en(ticker)
     body = generate_post_with_variety(market_snapshot=snapshot, fp_records=fp_records)
@@ -501,8 +478,17 @@ def main() -> None:
 
     code = data.get("code")
     if code != "000000":
+        msg = data.get("message")
+        print(f"Square API rejected: code={code!r} message={msg!r}", file=sys.stderr)
         err = json.dumps(data, ensure_ascii=False, indent=2)
         print(err, file=sys.stderr)
+        msg_l = (str(msg) or "").lower()
+        if str(code) == "220009" or "limit" in msg_l or "exceed" in msg_l:
+            print(
+                "Hint: Square OpenAPI hit a frequency/daily limit. "
+                "If you use cron */20 (3 posts/hour) and only the :40 run fails, set cron to */30 (2/hour) or rarer.",
+                file=sys.stderr,
+            )
         send_telegram(f"Square rejected\n{TARGET_SPOT_PAIR}\n{data.get('message') or err[:500]}")
         sys.exit(1)
 

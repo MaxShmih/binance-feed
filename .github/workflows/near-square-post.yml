@@ -7,19 +7,26 @@ on:
         description: Only generate text, no Binance publish
         type: boolean
         default: false
+      cron_id:
+        description: Optional label from external cron (logged only)
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
-
-concurrency:
-  group: near-square-post-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   post:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
+      # Cache actions still ship on Node 20 until upstream moves default; opt into Node 24 per GitHub guidance.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      # Tuned for frequent runs (e.g. every 15m ≈ 4 Groq calls/hour if 1 attempt each).
+      GROQ_MAX_TOKENS: "300"
+      GROQ_GENERATION_ATTEMPTS: "1"
+      GROQ_ANTI_REPEAT_TEASERS: "3"
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       BINANCE_SQUARE_API_KEY: ${{ secrets.BINANCE_SQUARE_API_KEY }}
       GROQ_MODEL: ${{ secrets.GROQ_MODEL }}
@@ -49,8 +56,10 @@ jobs:
       - name: Run
         env:
           POST_FINGERPRINT_PATH: state/post_fingerprints.jsonl
+          CRON_TRIGGER_ID: ${{ github.event.inputs.cron_id }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          echo "workflow_dispatch cron_id=${CRON_TRIGGER_ID:-}"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             python post_square.py --dry-run
           else
             python post_square.py
