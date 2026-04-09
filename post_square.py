@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -9,7 +10,7 @@ import re
 import sys
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import httpx
 from dotenv import load_dotenv
@@ -62,6 +63,22 @@ _LONG_DECIMAL = re.compile(r"\b\d+\.\d{5,}\b")
 def _fp_path() -> Path:
     raw = os.environ.get("POST_FINGERPRINT_PATH", "").strip()
     p = Path(raw) if raw else _ROOT / "data" / "post_fingerprints.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _fp_path_for_account(account: str) -> Path:
+    """
+    Per-account fingerprint history prevents cross-account repeats and avoids races
+    when multiple accounts run in parallel.
+    """
+    raw = os.environ.get("POST_FINGERPRINT_PATH", "").strip()
+    if raw:
+        p = Path(raw)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", (account or "default").strip())[:64] or "default"
+    p = _ROOT / "data" / f"post_fingerprints.{safe}.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -332,12 +349,18 @@ def _groq_generation_attempts() -> int:
     return max(1, min(n, 3))
 
 
-def _groq_complete(messages: list[dict[str, str]], *, model: str, temp: float) -> str:
+def _groq_complete(
+    messages: list[dict[str, str]],
+    *,
+    model: str,
+    temp: float,
+    api_key: str,
+) -> str:
     from groq import Groq
 
-    key = os.environ.get("GROQ_API_KEY", "").strip()
+    key = (api_key or "").strip()
     if not key:
-        print("Set GROQ_API_KEY", file=sys.stderr)
+        print("Set GROQ_API_KEY (or per-account GROQ_API_KEY_<NAME>)", file=sys.stderr)
         sys.exit(1)
     client = Groq(api_key=key, timeout=120.0)
     max_tok = _groq_max_tokens()
@@ -370,6 +393,7 @@ def generate_post_with_variety(
     *,
     market_snapshot: str,
     fp_records: list[dict[str, str]],
+    groq_api_key: str,
 ) -> str:
     model = os.environ.get("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL
     known_d = {r["d"] for r in fp_records}
@@ -399,7 +423,7 @@ def generate_post_with_variety(
             anti_repeat=anti,
             retry_note=retry_note,
         )
-        raw = _groq_complete(messages, model=model, temp=chosen_temp)
+        raw = _groq_complete(messages, model=model, temp=chosen_temp, api_key=groq_api_key)
         body = finalize_post_body(raw)
         if body_digest(body) not in known_d:
             return body
@@ -434,6 +458,146 @@ def publish_square(body: str, api_key: str, *, content_extra: dict[str, Any] | N
     return r.json()
 
 
+class _AccountCfg(TypedDict):
+    name: str
+    square_api_key: str
+    groq_api_key: str
+
+
+def _parse_key_list(raw: str) -> list[str]:
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    if raw.startswith("["):
+        try:
+            v = json.loads(raw)
+            if isinstance(v, list):
+                return [str(x).strip() for x in v if str(x).strip()]
+        except json.JSONDecodeError:
+            return []
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def _get_key_by_name(prefix: str, name: str) -> str:
+    suffix = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_")
+    candidates = [
+        f"{prefix}_{suffix}",
+        f"{prefix}_{suffix.upper()}",
+        f"{prefix}_{suffix.lower()}",
+    ]
+    for env_name in candidates:
+        v = os.environ.get(env_name, "").strip()
+        if v:
+            return v
+    return ""
+
+
+def _parse_account_configs_from_env() -> list[_AccountCfg]:
+    """
+    Supported:
+    - BINANCE_SQUARE_ACCOUNTS=acc1,acc2,acc3 and BINANCE_SQUARE_API_KEY_ACC1=... (case-insensitive by suffix)
+      + GROQ_API_KEY_ACC1=... (same names)
+    - BINANCE_SQUARE_API_KEYS=key1,key2,key3  (or JSON array)
+      + GROQ_API_KEYS=key1,key2,key3          (same length)
+    - BINANCE_SQUARE_API_KEY=single
+      + GROQ_API_KEY=single
+    """
+    accs_raw = os.environ.get("BINANCE_SQUARE_ACCOUNTS", "").strip()
+    if accs_raw:
+        names = [x.strip() for x in accs_raw.split(",") if x.strip()]
+        out: list[_AccountCfg] = []
+        for name in names:
+            sq = _get_key_by_name("BINANCE_SQUARE_API_KEY", name)
+            if not sq:
+                continue
+            g = _get_key_by_name("GROQ_API_KEY", name) or os.environ.get("GROQ_API_KEY", "").strip()
+            out.append({"name": name, "square_api_key": sq, "groq_api_key": g})
+        return out
+
+    keys_raw = os.environ.get("BINANCE_SQUARE_API_KEYS", "").strip()
+    if keys_raw:
+        sq_keys = _parse_key_list(keys_raw)
+        groq_keys = _parse_key_list(os.environ.get("GROQ_API_KEYS", ""))
+        if groq_keys and len(groq_keys) != len(sq_keys):
+            print(
+                f"GROQ_API_KEYS length mismatch: got {len(groq_keys)} but BINANCE_SQUARE_API_KEYS has {len(sq_keys)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        out: list[_AccountCfg] = []
+        for i, sq in enumerate(sq_keys):
+            name = f"acc{i+1}"
+            g = groq_keys[i] if groq_keys else os.environ.get("GROQ_API_KEY", "").strip()
+            out.append({"name": name, "square_api_key": sq, "groq_api_key": g})
+        return out
+
+    single = os.environ.get("BINANCE_SQUARE_API_KEY", "").strip()
+    if not single:
+        return []
+    groq = os.environ.get("GROQ_API_KEY", "").strip()
+    return [{"name": "default", "square_api_key": single, "groq_api_key": groq}]
+
+
+def _run_for_account(*, cfg: _AccountCfg, snapshot: str, dry_run: bool) -> str | None:
+    account = cfg["name"]
+    fp_path = _fp_path_for_account(account)
+    fp_records = load_fingerprint_records(fp_path)
+    body = generate_post_with_variety(
+        market_snapshot=snapshot,
+        fp_records=fp_records,
+        groq_api_key=cfg.get("groq_api_key", ""),
+    )
+
+    print(f"--- Post (EN) [{account}] ---")
+    print(body)
+    print("-----------------------------")
+
+    if dry_run:
+        return None
+
+    try:
+        data = publish_square(body, cfg["square_api_key"], content_extra=load_square_content_extra())
+    except httpx.HTTPError as e:
+        send_telegram(f"Square HTTP error\n{TARGET_SPOT_PAIR}\naccount={account}\n{e}")
+        raise
+
+    code = data.get("code")
+    if code != "000000":
+        msg = data.get("message")
+        msg_l = (str(msg) or "").lower()
+        err = json.dumps(data, ensure_ascii=False, indent=2)
+        if str(code) == "220009" or "limit" in msg_l or "exceed" in msg_l:
+            print(
+                f"[{account}] Hint: Square OpenAPI hit a frequency/daily limit. "
+                "Reduce cron frequency per account or stagger schedules.",
+                file=sys.stderr,
+            )
+        send_telegram(
+            f"Square rejected\n{TARGET_SPOT_PAIR}\naccount={account}\n{data.get('message') or err[:500]}"
+        )
+        raise RuntimeError(f"Square API rejected for {account}: code={code!r} message={msg!r}")
+
+    cid = (data.get("data") or {}).get("id")
+    url = f"https://www.binance.com/square/post/{cid}" if cid else None
+    if cid:
+        print(f"[{account}] Published: {url}")
+    else:
+        print(f"[{account}] OK but no id")
+
+    append_fingerprint(fp_path, body)
+
+    tg_ok = send_telegram(
+        f"Published {TARGET_PAIR_DISPLAY}\n"
+        + f"account={account}\n"
+        + (f"{url}\n" if url else "")
+        + f"\n{body[:600]}"
+        + ("…" if len(body) > 600 else "")
+    )
+    if not tg_ok:
+        print(f"[{account}] Telegram: notification was not delivered (see logs above).", file=sys.stderr)
+    return url
+
+
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         try:
@@ -444,10 +608,13 @@ def main() -> None:
 
     p = argparse.ArgumentParser()
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument(
+        "--max-workers",
+        type=int,
+        default=0,
+        help="Parallel accounts limit (0 = auto).",
+    )
     args = p.parse_args()
-
-    fp_path = _fp_path()
-    fp_records = load_fingerprint_records(fp_path)
 
     trig = os.environ.get("CRON_TRIGGER_ID", "").strip()
     if trig:
@@ -455,60 +622,53 @@ def main() -> None:
 
     ticker = fetch_24h_ticker_near()
     snapshot = build_market_snapshot_en(ticker)
-    body = generate_post_with_variety(market_snapshot=snapshot, fp_records=fp_records)
 
-    print("--- Post (EN) ---")
-    print(body)
-    print("-------------------")
+    accounts = _parse_account_configs_from_env()
+    accounts = [a for a in accounts if a.get("square_api_key")]
+    if not accounts or any(not a.get("groq_api_key") for a in accounts):
+        print(
+            "Missing keys. Set:\n"
+            "- BINANCE_SQUARE_ACCOUNTS + BINANCE_SQUARE_API_KEY_<NAME> + GROQ_API_KEY_<NAME>\n"
+            "  OR\n"
+            "- BINANCE_SQUARE_API_KEYS + GROQ_API_KEYS (same length)\n"
+            "  OR\n"
+            "- BINANCE_SQUARE_API_KEY + GROQ_API_KEY",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if args.dry_run:
+        for cfg in accounts:
+            _run_for_account(cfg=cfg, snapshot=snapshot, dry_run=True)
         return
 
-    bkey = os.environ.get("BINANCE_SQUARE_API_KEY")
-    if not bkey:
-        print("Set BINANCE_SQUARE_API_KEY", file=sys.stderr)
-        sys.exit(1)
+    max_workers = args.max_workers if args.max_workers and args.max_workers > 0 else min(8, len(accounts))
+    failures: list[str] = []
+    published: list[tuple[str, str | None]] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = {ex.submit(_run_for_account, cfg=cfg, snapshot=snapshot, dry_run=False): cfg["name"] for cfg in accounts}
+        for fut in concurrent.futures.as_completed(futs):
+            name = futs[fut]
+            try:
+                url = fut.result()
+                published.append((name, url))
+            except Exception as e:
+                failures.append(f"{name}: {type(e).__name__}: {e}")
 
-    try:
-        data = publish_square(body, bkey, content_extra=load_square_content_extra())
-    except httpx.HTTPError as e:
-        send_telegram(f"Square HTTP error\n{TARGET_SPOT_PAIR}\n{e}")
-        print(str(e), file=sys.stderr)
-        sys.exit(1)
+    # One compact summary ping per cron run (useful when running 3 accounts in parallel).
+    summary_lines = [f"Square run summary ({TARGET_PAIR_DISPLAY})"]
+    if published:
+        for name, url in sorted(published):
+            summary_lines.append(f"OK  account={name}" + (f"  {url}" if url else ""))
+    if failures:
+        for f in failures:
+            summary_lines.append(f"ERR {f}")
+    send_telegram("\n".join(summary_lines))
 
-    code = data.get("code")
-    if code != "000000":
-        msg = data.get("message")
-        print(f"Square API rejected: code={code!r} message={msg!r}", file=sys.stderr)
-        err = json.dumps(data, ensure_ascii=False, indent=2)
-        print(err, file=sys.stderr)
-        msg_l = (str(msg) or "").lower()
-        if str(code) == "220009" or "limit" in msg_l or "exceed" in msg_l:
-            print(
-                "Hint: Square OpenAPI hit a frequency/daily limit. "
-                "If you use cron */20 (3 posts/hour) and only the :40 run fails, set cron to */30 (2/hour) or rarer.",
-                file=sys.stderr,
-            )
-        send_telegram(f"Square rejected\n{TARGET_SPOT_PAIR}\n{data.get('message') or err[:500]}")
-        sys.exit(1)
-
-    cid = (data.get("data") or {}).get("id")
-    url = f"https://www.binance.com/square/post/{cid}" if cid else None
-    if cid:
-        print(f"Published: {url}")
-    else:
-        print("OK but no id")
-
-    append_fingerprint(fp_path, body)
-
-    tg_ok = send_telegram(
-        f"Published {TARGET_PAIR_DISPLAY}\n"
-        + (f"{url}\n" if url else "")
-        + f"\n{body[:600]}"
-        + ("…" if len(body) > 600 else "")
-    )
-    if not tg_ok:
-        print("Telegram: notification was not delivered (see logs above).", file=sys.stderr)
+    if failures:
+        # Exit non-zero so cron can alert; Telegram is already attempted per-account on known failures.
+        print("Some accounts failed:\n- " + "\n- ".join(failures), file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":
