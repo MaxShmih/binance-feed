@@ -77,8 +77,10 @@ def _fp_path_for_account(account: str) -> Path:
         p = Path(raw)
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
+    raw_dir = os.environ.get("POST_FINGERPRINT_DIR", "").strip()
+    base = Path(raw_dir) if raw_dir else (_ROOT / "data")
     safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", (account or "default").strip())[:64] or "default"
-    p = _ROOT / "data" / f"post_fingerprints.{safe}.jsonl"
+    p = base / f"post_fingerprints.{safe}.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -506,12 +508,28 @@ def _parse_account_configs_from_env() -> list[_AccountCfg]:
     if accs_raw:
         names = [x.strip() for x in accs_raw.split(",") if x.strip()]
         out: list[_AccountCfg] = []
+        missing_sq: list[str] = []
+        missing_groq: list[str] = []
         for name in names:
             sq = _get_key_by_name("BINANCE_SQUARE_API_KEY", name)
             if not sq:
+                missing_sq.append(name)
                 continue
-            g = _get_key_by_name("GROQ_API_KEY", name) or os.environ.get("GROQ_API_KEY", "").strip()
+            g = _get_key_by_name("GROQ_API_KEY", name)
+            if not g:
+                missing_groq.append(name)
+                g = os.environ.get("GROQ_API_KEY", "").strip()
+            if not g:
+                missing_groq.append(name)
             out.append({"name": name, "square_api_key": sq, "groq_api_key": g})
+        if missing_sq or missing_groq:
+            msg = ["BINANCE_SQUARE_ACCOUNTS mode: missing keys."]
+            if missing_sq:
+                msg.append("Missing BINANCE_SQUARE_API_KEY_<NAME> for: " + ", ".join(sorted(set(missing_sq))))
+            if missing_groq:
+                msg.append("Missing GROQ_API_KEY_<NAME> (or GROQ_API_KEY fallback) for: " + ", ".join(sorted(set(missing_groq))))
+            print("\n".join(msg), file=sys.stderr)
+            sys.exit(1)
         return out
 
     keys_raw = os.environ.get("BINANCE_SQUARE_API_KEYS", "").strip()
@@ -609,6 +627,11 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--dry-run", action="store_true")
     p.add_argument(
+        "--show-accounts",
+        action="store_true",
+        help="Print parsed account names (no secrets) and exit.",
+    )
+    p.add_argument(
         "--max-workers",
         type=int,
         default=0,
@@ -636,6 +659,12 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+    if args.show_accounts:
+        print("Parsed accounts:")
+        for a in accounts:
+            print(f"- {a['name']}")
+        return
 
     if args.dry_run:
         for cfg in accounts:

@@ -27,8 +27,14 @@ jobs:
       GROQ_MAX_TOKENS: "300"
       GROQ_GENERATION_ATTEMPTS: "1"
       GROQ_ANTI_REPEAT_TEASERS: "3"
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      BINANCE_SQUARE_API_KEY: ${{ secrets.BINANCE_SQUARE_API_KEY }}
+      # Multi-account mode
+      BINANCE_SQUARE_ACCOUNTS: acc1,acc2,acc3
+      BINANCE_SQUARE_API_KEY_ACC1: ${{ secrets.BINANCE_SQUARE_API_KEY_ACC1 }}
+      BINANCE_SQUARE_API_KEY_ACC2: ${{ secrets.BINANCE_SQUARE_API_KEY_ACC2 }}
+      BINANCE_SQUARE_API_KEY_ACC3: ${{ secrets.BINANCE_SQUARE_API_KEY_ACC3 }}
+      GROQ_API_KEY_ACC1: ${{ secrets.GROQ_API_KEY_ACC1 }}
+      GROQ_API_KEY_ACC2: ${{ secrets.GROQ_API_KEY_ACC2 }}
+      GROQ_API_KEY_ACC3: ${{ secrets.GROQ_API_KEY_ACC3 }}
       GROQ_MODEL: ${{ secrets.GROQ_MODEL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -55,7 +61,7 @@ jobs:
 
       - name: Run
         env:
-          POST_FINGERPRINT_PATH: state/post_fingerprints.jsonl
+          POST_FINGERPRINT_DIR: state
           CRON_TRIGGER_ID: ${{ github.event.inputs.cron_id }}
         run: |
           echo "workflow_dispatch cron_id=${CRON_TRIGGER_ID:-}"
