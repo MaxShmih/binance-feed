@@ -29,7 +29,7 @@ jobs:
       GROQ_ANTI_REPEAT_TEASERS: "3"
       FREELLMAPI_BASE_URL: http://152.70.27.249:3001/v1
       FREELLMAPI_API_KEY: ${{ secrets.FREELLMAPI_API_KEY }}
-      FREELLMAPI_MODEL: auto
+      FREELLMAPI_MODEL: llama-3.3-70b-versatile
       # Multi-account mode
       BINANCE_SQUARE_ACCOUNTS: acc1,acc2,acc3
       BINANCE_SQUARE_API_KEY_ACC1: ${{ secrets.BINANCE_SQUARE_API_KEY_ACC1 }}

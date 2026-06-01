@@ -8,6 +8,7 @@ import os
 import random
 import re
 import sys
+import time
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, TypedDict
@@ -355,9 +356,32 @@ def _llm_model() -> str:
         return (
             os.environ.get("FREELLMAPI_MODEL", "").strip()
             or os.environ.get("GROQ_MODEL", "").strip()
-            or "auto"
+            or DEFAULT_GROQ_MODEL
         )
     return os.environ.get("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL
+
+
+def _llm_models_to_try(primary: str) -> list[str]:
+    """Primary model, then optional fallback when using FreeLLMAPI."""
+    models = [primary]
+    if not _llm_proxy_config():
+        return models
+    fb = (
+        os.environ.get("FREELLMAPI_MODEL_FALLBACK", "").strip()
+        or DEFAULT_GROQ_MODEL
+    )
+    if fb and fb not in models:
+        models.append(fb)
+    return models
+
+
+def _proxy_empty_retries() -> int:
+    raw = os.environ.get("FREELLMAPI_EMPTY_RETRIES", "3").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        return 3
+    return max(1, min(n, 5))
 
 
 def _groq_max_tokens() -> int:
@@ -387,6 +411,7 @@ def _llm_complete(
 ) -> str:
     proxy = _llm_proxy_config()
     max_tok = _groq_max_tokens()
+    empty_retries = _proxy_empty_retries() if proxy else 1
 
     if proxy:
         from openai import OpenAI
@@ -403,26 +428,51 @@ def _llm_complete(
         client = Groq(api_key=key, timeout=120.0)
         provider_label = "Groq"
 
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temp,
-            max_tokens=max_tok,
-        )
-    except Exception as e:
-        if _is_llm_rate_limit(e):
-            raise RuntimeError(
-                f"{provider_label}: rate limit — {e!s}. "
-                "Proxy will retry other keys on next run; or lower cron frequency / GROQ_MAX_TOKENS."
-            ) from e
-        raise
+    last_finish: str | None = None
+    last_model: str | None = None
+    for try_model in _llm_models_to_try(model):
+        for attempt in range(empty_retries):
+            try:
+                resp = client.chat.completions.create(
+                    model=try_model,
+                    messages=messages,
+                    temperature=temp,
+                    max_tokens=max_tok,
+                )
+            except Exception as e:
+                if _is_llm_rate_limit(e):
+                    raise RuntimeError(
+                        f"{provider_label}: rate limit — {e!s}. "
+                        "Proxy will retry other keys on next run; or lower cron frequency / GROQ_MAX_TOKENS."
+                    ) from e
+                raise
 
-    raw = (resp.choices[0].message.content or "").strip()
-    text = _strip_wrapping(raw)
-    if not text:
-        raise RuntimeError(f"{provider_label}: empty model response")
-    return text
+            choice = resp.choices[0]
+            last_finish = getattr(choice, "finish_reason", None)
+            last_model = getattr(resp, "model", None) or try_model
+            raw = (choice.message.content or "").strip()
+            text = _strip_wrapping(raw)
+            if text:
+                if attempt > 0 or try_model != model:
+                    print(
+                        f"{provider_label}: ok model={last_model!r} "
+                        f"(after retry {attempt + 1}, requested={model!r})",
+                        file=sys.stderr,
+                    )
+                return text
+
+            print(
+                f"{provider_label}: empty response attempt {attempt + 1}/{empty_retries} "
+                f"model={last_model!r} finish_reason={last_finish!r}",
+                file=sys.stderr,
+            )
+            if attempt + 1 < empty_retries:
+                time.sleep(1.2 * (attempt + 1))
+
+    raise RuntimeError(
+        f"{provider_label}: empty model response "
+        f"(last model={last_model!r}, finish_reason={last_finish!r})"
+    )
 
 
 def generate_post_with_variety(
@@ -716,7 +766,17 @@ def main() -> None:
             _run_for_account(cfg=cfg, snapshot=snapshot, dry_run=True)
         return
 
-    max_workers = args.max_workers if args.max_workers and args.max_workers > 0 else min(8, len(accounts))
+    if args.max_workers and args.max_workers > 0:
+        max_workers = args.max_workers
+    elif proxy and os.environ.get("FREELLMAPI_PARALLEL_ACCOUNTS", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        # One LLM request at a time — avoids empty responses on small FreeLLMAPI VPS.
+        max_workers = 1
+    else:
+        max_workers = min(8, len(accounts))
     failures: list[str] = []
     published: list[tuple[str, str | None]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
