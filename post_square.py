@@ -29,8 +29,9 @@ FP_TEASER_LEN = 96
 
 SYSTEM_NEAR_FEED_PROMPT = """One Binance Square post in English about $NEAR.
 Only use numbers from SNAPSHOT; no fake news. Short price decimals; not financial advice.
+Include at least two concrete figures from SNAPSHOT (price, 24h %, volume, high/low). No generic filler.
 No: buy now, guaranteed, 100x. Body mentions $NEAR; end with #near + a few tags.
-Follow FORMAT from user. If RECENT lines exist, same data OK but different hook/shape.
+Follow FORMAT from user. If RECENT lines exist, same data OK but different hook/shape and opening line.
 Output post text only (no fences)."""
 
 # One FORMAT brief per run — keeps shape different (this drives variety more than a long system prompt).
@@ -323,14 +324,40 @@ def _chat_messages(
     ]
 
 
-def _is_groq_rate_limit(exc: BaseException) -> bool:
+def _is_llm_rate_limit(exc: BaseException) -> bool:
     if type(exc).__name__ == "RateLimitError":
         return True
     if getattr(exc, "status_code", None) == 429:
         return True
     err = f"{type(exc).__name__}: {exc!s}"
     low = err.lower()
-    return "429" in err or "rate_limit" in low or "rate limit" in low or "tpd" in low
+    return "429" in err or "rate_limit" in low or "rate limit" in low or "tpd" in low or "tpm" in low
+
+
+def _normalize_openai_base_url(raw: str) -> str:
+    u = raw.strip().rstrip("/")
+    if not u.endswith("/v1"):
+        u = f"{u}/v1"
+    return u
+
+
+def _llm_proxy_config() -> tuple[str, str] | None:
+    """FreeLLMAPI / any OpenAI-compatible proxy (FREELLMAPI_* or LLM_* env)."""
+    base = (os.environ.get("FREELLMAPI_BASE_URL") or os.environ.get("LLM_BASE_URL") or "").strip()
+    key = (os.environ.get("FREELLMAPI_API_KEY") or os.environ.get("LLM_API_KEY") or "").strip()
+    if base and key:
+        return _normalize_openai_base_url(base), key
+    return None
+
+
+def _llm_model() -> str:
+    if _llm_proxy_config():
+        return (
+            os.environ.get("FREELLMAPI_MODEL", "").strip()
+            or os.environ.get("GROQ_MODEL", "").strip()
+            or "auto"
+        )
+    return os.environ.get("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL
 
 
 def _groq_max_tokens() -> int:
@@ -351,21 +378,31 @@ def _groq_generation_attempts() -> int:
     return max(1, min(n, 3))
 
 
-def _groq_complete(
+def _llm_complete(
     messages: list[dict[str, str]],
     *,
     model: str,
     temp: float,
     api_key: str,
 ) -> str:
-    from groq import Groq
-
-    key = (api_key or "").strip()
-    if not key:
-        print("Set GROQ_API_KEY (or per-account GROQ_API_KEY_<NAME>)", file=sys.stderr)
-        sys.exit(1)
-    client = Groq(api_key=key, timeout=120.0)
+    proxy = _llm_proxy_config()
     max_tok = _groq_max_tokens()
+
+    if proxy:
+        from openai import OpenAI
+
+        base_url, proxy_key = proxy
+        client = OpenAI(base_url=base_url, api_key=proxy_key, timeout=120.0)
+        provider_label = "FreeLLMAPI"
+    else:
+        from groq import Groq
+
+        key = (api_key or "").strip()
+        if not key:
+            raise RuntimeError("Set GROQ_API_KEY (or per-account GROQ_API_KEY_<NAME>), or FREELLMAPI_BASE_URL + FREELLMAPI_API_KEY")
+        client = Groq(api_key=key, timeout=120.0)
+        provider_label = "Groq"
+
     try:
         resp = client.chat.completions.create(
             model=model,
@@ -374,20 +411,17 @@ def _groq_complete(
             max_tokens=max_tok,
         )
     except Exception as e:
-        if _is_groq_rate_limit(e):
-            print(
-                "Groq: rate limit (daily TPM/TPD or burst). "
-                "Options: wait for reset, post less often, shorten prompts (GROQ_MAX_TOKENS), "
-                "or upgrade Groq Dev Tier. Raw error:",
-                file=sys.stderr,
-            )
-            print(f"{e!s}", file=sys.stderr)
-            sys.exit(1)
+        if _is_llm_rate_limit(e):
+            raise RuntimeError(
+                f"{provider_label}: rate limit — {e!s}. "
+                "Proxy will retry other keys on next run; or lower cron frequency / GROQ_MAX_TOKENS."
+            ) from e
         raise
+
     raw = (resp.choices[0].message.content or "").strip()
     text = _strip_wrapping(raw)
     if not text:
-        sys.exit(1)
+        raise RuntimeError(f"{provider_label}: empty model response")
     return text
 
 
@@ -397,7 +431,7 @@ def generate_post_with_variety(
     fp_records: list[dict[str, str]],
     groq_api_key: str,
 ) -> str:
-    model = os.environ.get("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL
+    model = _llm_model()
     known_d = {r["d"] for r in fp_records}
     anti = format_anti_repeat_block(fp_records)
     def pick_format() -> str:
@@ -425,7 +459,7 @@ def generate_post_with_variety(
             anti_repeat=anti,
             retry_note=retry_note,
         )
-        raw = _groq_complete(messages, model=model, temp=chosen_temp, api_key=groq_api_key)
+        raw = _llm_complete(messages, model=model, temp=chosen_temp, api_key=groq_api_key)
         body = finalize_post_body(raw)
         if body_digest(body) not in known_d:
             return body
@@ -498,12 +532,13 @@ def _parse_account_configs_from_env() -> list[_AccountCfg]:
     """
     Supported:
     - BINANCE_SQUARE_ACCOUNTS=acc1,acc2,acc3 and BINANCE_SQUARE_API_KEY_ACC1=... (case-insensitive by suffix)
-      + GROQ_API_KEY_ACC1=... (same names)
+      + GROQ_API_KEY_ACC1=... (same names), unless FREELLMAPI_BASE_URL + FREELLMAPI_API_KEY are set
     - BINANCE_SQUARE_API_KEYS=key1,key2,key3  (or JSON array)
       + GROQ_API_KEYS=key1,key2,key3          (same length)
     - BINANCE_SQUARE_API_KEY=single
       + GROQ_API_KEY=single
     """
+    use_proxy = _llm_proxy_config() is not None
     accs_raw = os.environ.get("BINANCE_SQUARE_ACCOUNTS", "").strip()
     if accs_raw:
         names = [x.strip() for x in accs_raw.split(",") if x.strip()]
@@ -515,12 +550,14 @@ def _parse_account_configs_from_env() -> list[_AccountCfg]:
             if not sq:
                 missing_sq.append(name)
                 continue
-            g = _get_key_by_name("GROQ_API_KEY", name)
-            if not g:
-                missing_groq.append(name)
-                g = os.environ.get("GROQ_API_KEY", "").strip()
-            if not g:
-                missing_groq.append(name)
+            g = ""
+            if not use_proxy:
+                g = _get_key_by_name("GROQ_API_KEY", name)
+                if not g:
+                    missing_groq.append(name)
+                    g = os.environ.get("GROQ_API_KEY", "").strip()
+                if not g:
+                    missing_groq.append(name)
             out.append({"name": name, "square_api_key": sq, "groq_api_key": g})
         if missing_sq or missing_groq:
             msg = ["BINANCE_SQUARE_ACCOUNTS mode: missing keys."]
@@ -535,7 +572,7 @@ def _parse_account_configs_from_env() -> list[_AccountCfg]:
     keys_raw = os.environ.get("BINANCE_SQUARE_API_KEYS", "").strip()
     if keys_raw:
         sq_keys = _parse_key_list(keys_raw)
-        groq_keys = _parse_key_list(os.environ.get("GROQ_API_KEYS", ""))
+        groq_keys = [] if use_proxy else _parse_key_list(os.environ.get("GROQ_API_KEYS", ""))
         if groq_keys and len(groq_keys) != len(sq_keys):
             print(
                 f"GROQ_API_KEYS length mismatch: got {len(groq_keys)} but BINANCE_SQUARE_API_KEYS has {len(sq_keys)}",
@@ -545,14 +582,16 @@ def _parse_account_configs_from_env() -> list[_AccountCfg]:
         out: list[_AccountCfg] = []
         for i, sq in enumerate(sq_keys):
             name = f"acc{i+1}"
-            g = groq_keys[i] if groq_keys else os.environ.get("GROQ_API_KEY", "").strip()
+            g = ""
+            if not use_proxy:
+                g = groq_keys[i] if groq_keys else os.environ.get("GROQ_API_KEY", "").strip()
             out.append({"name": name, "square_api_key": sq, "groq_api_key": g})
         return out
 
     single = os.environ.get("BINANCE_SQUARE_API_KEY", "").strip()
     if not single:
         return []
-    groq = os.environ.get("GROQ_API_KEY", "").strip()
+    groq = "" if use_proxy else os.environ.get("GROQ_API_KEY", "").strip()
     return [{"name": "default", "square_api_key": single, "groq_api_key": groq}]
 
 
@@ -648,9 +687,13 @@ def main() -> None:
 
     accounts = _parse_account_configs_from_env()
     accounts = [a for a in accounts if a.get("square_api_key")]
-    if not accounts or any(not a.get("groq_api_key") for a in accounts):
+    proxy = _llm_proxy_config()
+    need_groq = not proxy and any(not a.get("groq_api_key") for a in accounts)
+    if not accounts or need_groq:
         print(
             "Missing keys. Set:\n"
+            "- FREELLMAPI_BASE_URL + FREELLMAPI_API_KEY (proxy; Groq keys optional)\n"
+            "  OR\n"
             "- BINANCE_SQUARE_ACCOUNTS + BINANCE_SQUARE_API_KEY_<NAME> + GROQ_API_KEY_<NAME>\n"
             "  OR\n"
             "- BINANCE_SQUARE_API_KEYS + GROQ_API_KEYS (same length)\n"
@@ -659,6 +702,8 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+    if proxy:
+        print(f"LLM via proxy: {_normalize_openai_base_url(os.environ.get('FREELLMAPI_BASE_URL') or os.environ.get('LLM_BASE_URL', ''))} model={_llm_model()}", file=sys.stderr)
 
     if args.show_accounts:
         print("Parsed accounts:")

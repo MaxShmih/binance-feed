@@ -25,17 +25,16 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       # Tuned for frequent runs (e.g. every 15m ≈ 4 Groq calls/hour if 1 attempt each).
       GROQ_MAX_TOKENS: "300"
-      GROQ_GENERATION_ATTEMPTS: "1"
+      GROQ_GENERATION_ATTEMPTS: "2"
       GROQ_ANTI_REPEAT_TEASERS: "3"
+      FREELLMAPI_BASE_URL: http://152.70.27.249:3001/v1
+      FREELLMAPI_API_KEY: ${{ secrets.FREELLMAPI_API_KEY }}
+      FREELLMAPI_MODEL: auto
       # Multi-account mode
       BINANCE_SQUARE_ACCOUNTS: acc1,acc2,acc3
       BINANCE_SQUARE_API_KEY_ACC1: ${{ secrets.BINANCE_SQUARE_API_KEY_ACC1 }}
       BINANCE_SQUARE_API_KEY_ACC2: ${{ secrets.BINANCE_SQUARE_API_KEY_ACC2 }}
       BINANCE_SQUARE_API_KEY_ACC3: ${{ secrets.BINANCE_SQUARE_API_KEY_ACC3 }}
-      GROQ_API_KEY_ACC1: ${{ secrets.GROQ_API_KEY_ACC1 }}
-      GROQ_API_KEY_ACC2: ${{ secrets.GROQ_API_KEY_ACC2 }}
-      GROQ_API_KEY_ACC3: ${{ secrets.GROQ_API_KEY_ACC3 }}
-      GROQ_MODEL: ${{ secrets.GROQ_MODEL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       SQUARE_SPOT_TRADE_URL: ${{ secrets.SQUARE_SPOT_TRADE_URL }}
