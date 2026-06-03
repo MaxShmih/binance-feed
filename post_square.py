@@ -28,12 +28,143 @@ TARGET_PAIR_DISPLAY = "NEAR/USDT"
 FP_MAX = 8
 FP_TEASER_LEN = 96
 
-SYSTEM_NEAR_FEED_PROMPT = """One Binance Square post in English about $NEAR.
-Only use numbers from SNAPSHOT; no fake news. Short price decimals; not financial advice.
-Include at least two concrete figures from SNAPSHOT (price, 24h %, volume, high/low). No generic filler.
-No: buy now, guaranteed, 100x. Body mentions $NEAR; end with #near + a few tags.
-Follow FORMAT from user. If RECENT lines exist, same data OK but different hook/shape and opening line.
-Output post text only (no fences)."""
+SYSTEM_NEAR_FEED_PROMPT = """
+You are a top 0.1% Binance Square creator known for generating highly engaging crypto posts that consistently attract views, likes, comments, shares, and follows.
+
+Your task is to write ONE Binance Square post in English about $NEAR for spot traders.
+
+PRIMARY GOAL:
+Make people stop scrolling and read the entire post.
+
+SECONDARY GOAL:
+Increase engagement through curiosity, emotion, trader psychology, and clear market observations.
+
+DATA RULES:
+
+* Use ONLY information contained in SNAPSHOT.
+* NEVER invent prices, percentages, volume, support, resistance, market events, catalysts, news, or technical levels.
+* NEVER assume future price movement as fact.
+* NEVER fabricate bullish or bearish signals.
+* Every market observation must be supported by SNAPSHOT data.
+
+CONTENT REQUIREMENTS:
+
+* Mention $NEAR naturally in the body.
+* Use at least 2 snapshot metrics naturally inside the narrative.
+* Explain what the current position inside the 24h range means.
+* Explain why the 24h change matters.
+* Explain what traders should monitor next.
+* Convert raw numbers into a story, not a report.
+
+PSYCHOLOGY:
+The post should feel like an experienced trader sharing an insight others may have missed.
+
+Create:
+
+* curiosity
+* anticipation
+* discussion
+* trader FOMO (without hype)
+* fear of missing information, NOT fear of missing profits
+
+GOOD THEMES:
+
+* momentum building
+* compression
+* range positioning
+* crowd psychology
+* accumulation behavior
+* market hesitation
+* breakout watch
+* trend continuation watch
+* hidden strength
+* hidden weakness
+* unusual volume behavior
+
+AVOID:
+
+* "interesting times"
+* "stay tuned"
+* "let's see"
+* "volatile market"
+* "market participants"
+* "always do your own research"
+* "this could be huge"
+* "100x"
+* "moon"
+* "lambo"
+* generic AI phrases
+* corporate language
+* dry reporting
+
+WRITING STYLE:
+
+* Human.
+* Confident.
+* Specific.
+* Fast-paced.
+* Social-media native.
+* Short paragraphs.
+* Strong rhythm.
+* No fluff.
+
+HOOK REQUIREMENTS:
+The first line is critical.
+
+Use one of these styles:
+
+* Contrarian observation
+* Unexpected statistic
+* Trader psychology insight
+* Hidden opportunity
+* Sharp question
+* Bold but data-backed statement
+
+Examples of hook style:
+
+* "Most traders are watching the wrong level on $NEAR."
+* "$NEAR is telling a different story than the headline number suggests."
+* "This is where traders usually start paying attention."
+* "The current setup on $NEAR is more interesting than it looks."
+* "One number in today's $NEAR data stands out."
+
+POST STRUCTURE:
+
+1. Hook
+2. Context from snapshot
+3. Why it matters
+4. What traders should watch next
+5. Engagement-driving closing line
+
+ENDING:
+Finish with a short question that encourages comments.
+
+Examples:
+
+* "What are you watching on $NEAR right now?"
+* "Do you see strength here or more range-bound action?"
+* "Would you be paying attention to this setup?"
+
+Then add a blank line.
+
+Then add:
+#near
+
+Plus 2–4 highly relevant crypto hashtags.
+
+DIVERSITY RULE:
+If RECENT posts are provided:
+
+* NEVER reuse the same opening.
+* NEVER reuse the same narrative angle.
+* NEVER reuse the same structure.
+* Generate a completely fresh perspective even when using the same snapshot.
+
+OUTPUT:
+Return ONLY the finished post text.
+Do not explain.
+Do not use markdown fences.
+"""
 
 # One FORMAT brief per run — keeps shape different (this drives variety more than a long system prompt).
 FORMAT_BRIEFS: tuple[str, ...] = (
@@ -55,8 +186,17 @@ FORMAT_BRIEFS: tuple[str, ...] = (
 
 AGGRESSIVE_FORMAT_BRIEF = (
     "FORMAT: High-converting trader energy: max 2 short paragraphs before hashtags. "
-    "Line1 must hit hard. Urgency/FOMO from structure (compression, breakout risk, levels) — no buy-now language, no guarantees. "
+    "Line1 must hit hard. Urgency from structure (range, breakout risk, vol) — no buy-now language, no guarantees. "
     "Smart-money vibe OK. Optional: at most 1 emoji. Then blank line, then hashtags."
+)
+
+QUALITY_FORMAT_BRIEFS: tuple[str, ...] = (
+    "FORMAT: Open with a one-line thesis (bullish/bearish/neutral) tied to 24h % and range position. "
+    "Then 2–3 sentences: price, hi/lo context, qVol read. One line what you'd watch next. Blank line, hashtags.",
+    "FORMAT: 'Tape read:' then 3 tight lines — (1) last vs range (2) vol/momentum (3) invalidation or next trigger. Blank line, hashtags.",
+    "FORMAT: Name the 24h high and low as levels; say where last sits between them (% vibe OK if in SNAPSHOT). "
+    "One sentence on whether vol supports the move. Blank line, hashtags.",
+    "FORMAT: Question hook, then answer in 2–3 sentences using only snapshot data. End with one concrete watch item. Blank line, hashtags.",
 )
 
 _LONG_DECIMAL = re.compile(r"\b\d+\.\d{5,}\b")
@@ -244,7 +384,7 @@ def ensure_actionable_body(body: str) -> str:
     # Optional CTA — always pushing "tap $NEAR" made posts feel identical.
     lower = main.lower()
     if "tap $near" not in lower and random.random() < float(
-        os.environ.get("SQUARE_TAP_CTA_PROB", "0.35")
+        os.environ.get("SQUARE_TAP_CTA_PROB", "0.25")
     ):
         main = f"{main.rstrip()}\n{random.choice(CTA_TEMPLATES)}"
     elif "watchlist" not in lower and "alert" not in lower and random.random() < 0.35:
@@ -298,8 +438,17 @@ def build_market_snapshot_en(ticker: dict[str, Any] | None) -> str:
     high = _fmt_price_usdt(ticker.get("highPrice"))
     low = _fmt_price_usdt(ticker.get("lowPrice"))
     qv = _fmt_quote_volume(ticker.get("quoteVolume"))
+    range_note = ""
+    last_d = _to_decimal(ticker.get("lastPrice"))
+    high_d = _to_decimal(ticker.get("highPrice"))
+    low_d = _to_decimal(ticker.get("lowPrice"))
+    if last_d is not None and high_d is not None and low_d is not None and high_d > low_d:
+        pos = ((last_d - low_d) / (high_d - low_d) * Decimal("100")).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+        range_note = f" Last is ~{pos}% up from 24h low toward high (within hi/lo band)."
     return (
-        f"{TARGET_PAIR_DISPLAY} 24h: last ~{last} USDT, {pct}%, hi/lo ~{high}/{low}, qVol ~{qv} USDT. "
+        f"{TARGET_PAIR_DISPLAY} 24h: last ~{last} USDT, {pct}%, hi/lo ~{high}/{low}, qVol ~{qv} USDT.{range_note} "
         "Use only these figures; short decimals in post."
     )
 
@@ -317,7 +466,9 @@ def _chat_messages(
     if retry_note:
         parts.append(retry_note.strip())
     parts.append(f"SNAPSHOT:\n{market_snapshot}")
-    parts.append("Write the post (EN). FORMAT + rules above.")
+    parts.append(
+        "Write the post (EN). Strong hook, concrete snapshot numbers, one clear takeaway. FORMAT + rules above."
+    )
     user = "\n\n".join(parts)
     return [
         {"role": "system", "content": SYSTEM_NEAR_FEED_PROMPT},
@@ -385,11 +536,11 @@ def _proxy_empty_retries() -> int:
 
 
 def _groq_max_tokens() -> int:
-    raw = os.environ.get("GROQ_MAX_TOKENS", "320").strip()
+    raw = os.environ.get("GROQ_MAX_TOKENS", "450").strip()
     try:
         n = int(raw)
     except ValueError:
-        return 320
+        return 450
     return max(120, min(n, 700))
 
 
@@ -485,18 +636,21 @@ def generate_post_with_variety(
     known_d = {r["d"] for r in fp_records}
     anti = format_anti_repeat_block(fp_records)
     def pick_format() -> str:
-        if random.random() < 0.25:
+        r = random.random()
+        if r < 0.30:
             return AGGRESSIVE_FORMAT_BRIEF
+        if r < 0.70:
+            return random.choice(QUALITY_FORMAT_BRIEFS)
         return random.choice(FORMAT_BRIEFS)
 
+    all_formats = (*FORMAT_BRIEFS, *QUALITY_FORMAT_BRIEFS, AGGRESSIVE_FORMAT_BRIEF)
     style_a = pick_format()
     style_b = pick_format()
     if style_b == style_a:
-        pool = [s for s in FORMAT_BRIEFS if s != style_a] or list(FORMAT_BRIEFS)
+        pool = [s for s in all_formats if s != style_a] or list(all_formats)
         style_b = random.choice(pool)
-    # Slightly higher temperature to reduce "dry" corporate tone.
-    temp_a = random.uniform(0.72, 1.02)
-    temp_b = random.uniform(0.78, 1.08)
+    temp_a = random.uniform(0.78, 0.96)
+    temp_b = random.uniform(0.82, 1.0)
 
     retry_note = ""
     chosen_style = style_a

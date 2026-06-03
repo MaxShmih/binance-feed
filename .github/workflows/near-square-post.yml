@@ -24,7 +24,7 @@ jobs:
       # Cache actions still ship on Node 20 until upstream moves default; opt into Node 24 per GitHub guidance.
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       # Tuned for frequent runs (e.g. every 15m ≈ 4 Groq calls/hour if 1 attempt each).
-      GROQ_MAX_TOKENS: "300"
+      GROQ_MAX_TOKENS: "450"
       GROQ_GENERATION_ATTEMPTS: "2"
       GROQ_ANTI_REPEAT_TEASERS: "3"
       FREELLMAPI_BASE_URL: http://152.70.27.249:3001/v1
